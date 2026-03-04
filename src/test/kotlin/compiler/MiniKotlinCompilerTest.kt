@@ -91,4 +91,31 @@ class MiniKotlinCompilerTest {
         assertTrue(lines[2].contains("true"), "Expected a == b to contain true, but got: ${lines[2]}")
         assertTrue(lines[3].contains("false"), "Expected a != b to contain false, but got: ${lines[3]}")
     }
+
+    @Test
+    fun `compile example_v3_mini outputs true false true true false`() {
+        val examplePath = Paths.get("samples/example.v3.mini")
+        val program = parseFile(examplePath)
+
+        val compiler = MiniKotlinCompiler()
+        val javaCode = compiler.compile(program)
+
+        val javaFile = tempDir.resolve("MiniProgram.java")
+        Files.writeString(javaFile, javaCode)
+
+        val javaCompiler = JavaRuntimeCompiler()
+        val stdlibPath = resolveStdlibPath()
+        val (compilationResult, executionResult) = javaCompiler.compileAndExecute(javaFile, stdlibPath)
+
+        assertIs<CompilationResult.Success>(compilationResult)
+        assertIs<ExecutionResult.Success>(executionResult)
+
+        val output = executionResult.stdout
+        val lines = output.lines()
+        assertTrue(lines[0].contains("true"), "Expected 'a' < 'b' to contain true, but got: ${lines[0]}")
+        assertTrue(lines[1].contains("false"), "Expected 'a' < 'a' to contain false, but got: ${lines[1]}")
+        assertTrue(lines[2].contains("true"), "Expected 'a' <= 'a' to contain true, but got: ${lines[2]}")
+        assertTrue(lines[3].contains("true"), "Expected 'abc' > 'aaa' to contain true, but got: ${lines[3]}")
+        assertTrue(lines[4].contains("false"), "Expected 'aa' >= 'aaa' to contain false, but got: ${lines[4]}")
+    }
 }

@@ -9,6 +9,8 @@ class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
 
     fun compile(program: MiniKotlinParser.ProgramContext, className: String = "MiniProgram"): String {
         return """
+import java.util.Objects;
+import java.util.Comparator;
 public class $className {
 ${visit(program)}
 }
@@ -97,11 +99,18 @@ ${visit(program)}
         return "return $expression"
     }
 
+    override fun visitComparisonExpr(ctx: MiniKotlinParser.ComparisonExprContext): String {
+        val left = visit(ctx.expression(0))
+        val right = visit(ctx.expression(1))
+        val op = visit(ctx.getChild(1))
+        return "Objects.compare($left,$right,Comparator.naturalOrder()) $op 0"
+    }
+
     override fun visitEqualityExpr(ctx: MiniKotlinParser.EqualityExprContext): String {
         val left = visit(ctx.expression(0))
         val right = visit(ctx.expression(1))
         val not = if (ctx.NEQ() != null) "!" else ""
-        return "${not}java.util.Objects.equals($left,$right)"
+        return "${not}Objects.equals($left,$right)"
     }
 
     override fun visitTerminal(node: TerminalNode): String = when (node.text) {

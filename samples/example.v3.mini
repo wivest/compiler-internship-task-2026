@@ -1,0 +1,7 @@
+fun main(): Unit {
+    println("a" < "b")
+    println("a" < "a")
+    println("a" <= "a")
+    println("abc" > "aaa")
+    println("aa" >= "aaa")
+}
