@@ -12,6 +12,8 @@ class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
     val expressionFunCalls = mutableListOf<Pair<String, String>>()
     var blockFunCalls = 0
 
+    val funParams = mutableListOf<String>()
+
     fun compile(program: MiniKotlinParser.ProgramContext, className: String = "MiniProgram"): String {
         return """
 import java.util.Objects;
@@ -34,12 +36,13 @@ ${visit(program)}
         val modifiers = "public static void"
         val funName = visit(ctx.IDENTIFIER())
         val type = visit(ctx.type())
-        val block = visit(ctx.block())
         val params = when (val params = ctx.parameterList()) {
-            null -> if (funName == "main") "String[] args" else ""
+            null -> if (funName == "main") "String[] args" else "Continuation<$type> $contFunName"
             else -> "${visit(params)}, Continuation<$type> $contFunName"
         }
+        val block = visit(ctx.block())
 
+        funParams.clear()
         return "$modifiers $funName($params) $block\n"
     }
 
@@ -54,6 +57,7 @@ ${visit(program)}
     override fun visitParameter(ctx: MiniKotlinParser.ParameterContext): String {
         val paramName = visit(ctx.IDENTIFIER())
         val type = visit(ctx.type())
+        funParams.add(paramName)
         return "$type $paramName"
     }
 
@@ -73,7 +77,7 @@ ${visit(program)}
             result += "${visit(statement)}\n"
         }
 
-        for (i in 0..<blockFunCalls) result += "\n});"
+        for (i in 0..<blockFunCalls) result += "});"
         blockFunCalls = 0
         return "{\n$result}"
     }
@@ -102,13 +106,13 @@ ${visit(program)}
         val varName = visit(ctx.IDENTIFIER())
         val type = visit(ctx.type())
         val expression = visit(ctx.expression())
-        return "$type $varName = $expression"
+        return "final $type[] $varName = {$expression}"
     }
 
     override fun visitVariableAssignment(ctx: MiniKotlinParser.VariableAssignmentContext): String {
         val varName = visit(ctx.IDENTIFIER())
         val expression = visit(ctx.expression())
-        return "$varName = $expression"
+        return "$varName[0] = $expression"
     }
 
     override fun visitReturnStatement(ctx: MiniKotlinParser.ReturnStatementContext): String {
@@ -124,7 +128,7 @@ ${visit(program)}
         val argList = visit(ctx.argumentList())
         val i = expressionFunCalls.size
         expressionFunCalls.add(Pair(funName, argList))
-        return "$contArgName${i}"
+        return "$contArgName$i"
     }
 
     override fun visitComparisonExpr(ctx: MiniKotlinParser.ComparisonExprContext): String {
@@ -139,6 +143,11 @@ ${visit(program)}
         val right = visit(ctx.expression(1))
         val not = if (ctx.NEQ() != null) "!" else ""
         return "${not}Objects.equals($left,$right)"
+    }
+
+    override fun visitIdentifierExpr(ctx: MiniKotlinParser.IdentifierExprContext): String {
+        val id = visit(ctx.IDENTIFIER())
+        return if (funParams.contains(id)) id else "$id[0]"
     }
 
     override fun visitTerminal(node: TerminalNode): String = when (node.text) {
