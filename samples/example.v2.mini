@@ -1,0 +1,9 @@
+fun main(): Unit {
+    println("abc" == "cba")
+    println("abc" == "abc")
+    var a: String = "abc"
+    var b: String = "ab"
+    b = b + "c"
+    println(a == b)
+    println(a != b)
+}

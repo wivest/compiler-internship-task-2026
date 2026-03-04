@@ -97,6 +97,13 @@ ${visit(program)}
         return "return $expression"
     }
 
+    override fun visitEqualityExpr(ctx: MiniKotlinParser.EqualityExprContext): String {
+        val left = visit(ctx.expression(0))
+        val right = visit(ctx.expression(1))
+        val not = if (ctx.NEQ() != null) "!" else ""
+        return "${not}java.util.Objects.equals($left,$right)"
+    }
+
     override fun visitTerminal(node: TerminalNode): String = when (node.text) {
         "println" -> "System.out.println" // only known function from outside scope
         else -> node.text
