@@ -7,6 +7,11 @@ import org.antlr.v4.runtime.tree.TerminalNode
 
 class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
 
+    val contFunName = "__continuation"
+    val contArgName = "arg"
+    val expressionFunCalls = mutableListOf<Pair<String, String>>()
+    var blockFunCalls = 0
+
     fun compile(program: MiniKotlinParser.ProgramContext, className: String = "MiniProgram"): String {
         return """
 import java.util.Objects;
@@ -26,16 +31,16 @@ ${visit(program)}
     }
 
     override fun visitFunctionDeclaration(ctx: MiniKotlinParser.FunctionDeclarationContext): String {
-        val modifiers = "public static"
+        val modifiers = "public static void"
         val funName = visit(ctx.IDENTIFIER())
-        val type = visit(ctx.type()) // TODO: this is not CPS compliant
+        val type = visit(ctx.type())
         val block = visit(ctx.block())
         val params = when (val params = ctx.parameterList()) {
             null -> if (funName == "main") "String[] args" else ""
-            else -> visit(params)
+            else -> "${visit(params)}, Continuation<$type> $contFunName"
         }
 
-        return "$modifiers $type $funName($params) $block\n"
+        return "$modifiers $funName($params) $block\n"
     }
 
     override fun visitParameterList(ctx: MiniKotlinParser.ParameterListContext): String {
@@ -67,14 +72,30 @@ ${visit(program)}
         for (statement in ctx.statement()) {
             result += "${visit(statement)}\n"
         }
+
+        for (i in 0..<blockFunCalls) result += "\n});"
+        blockFunCalls = 0
         return "{\n$result}"
     }
 
     override fun visitStatement(ctx: MiniKotlinParser.StatementContext): String {
-        return when {
+        val statement = when {
             ctx.ifStatement() != null || ctx.whileStatement() != null -> visitChildren(ctx)
+            ctx.expression() != null -> {
+                visitChildren(ctx); "" // the only expression is function call
+            }
+
             else -> "${visitChildren(ctx)};"
         }
+
+        var funCalls = ""
+        for (funCall in expressionFunCalls) {
+            funCalls += "${funCall.first}(${funCall.second}, ($contArgName$blockFunCalls) -> {\n"
+            blockFunCalls++
+        }
+        expressionFunCalls.clear()
+
+        return "$funCalls$statement"
     }
 
     override fun visitVariableDeclaration(ctx: MiniKotlinParser.VariableDeclarationContext): String {
@@ -90,13 +111,20 @@ ${visit(program)}
         return "$varName = $expression"
     }
 
-    // TODO: make CPS compliant
     override fun visitReturnStatement(ctx: MiniKotlinParser.ReturnStatementContext): String {
         val expression = when (val expressionContext = ctx.expression()) {
             null -> ""
             else -> visit(expressionContext)
         }
-        return "return $expression"
+        return "$contFunName.accept($expression);\nreturn"
+    }
+
+    override fun visitFunctionCallExpr(ctx: MiniKotlinParser.FunctionCallExprContext): String {
+        val funName = visit(ctx.IDENTIFIER())
+        val argList = visit(ctx.argumentList())
+        val i = expressionFunCalls.size
+        expressionFunCalls.add(Pair(funName, argList))
+        return "$contArgName${i}"
     }
 
     override fun visitComparisonExpr(ctx: MiniKotlinParser.ComparisonExprContext): String {
@@ -114,7 +142,7 @@ ${visit(program)}
     }
 
     override fun visitTerminal(node: TerminalNode): String = when (node.text) {
-        "println" -> "System.out.println" // only known function from outside scope
+        "println" -> "Prelude.println" // only known function from outside scope
         else -> node.text
     }
 
