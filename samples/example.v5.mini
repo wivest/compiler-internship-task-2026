@@ -1,0 +1,26 @@
+fun identity(n: Int): Int {
+    return n
+}
+
+fun plus1(n: Int): Int {
+    return n + 1
+}
+
+fun add(a: Int, b: Int): Unit {
+    if (b == 0) {
+        println("Zero")
+        return
+    }
+    var a1: Int = a
+    var b1: Int = b
+    while (identity(b1) > 0) {
+        a1 = plus1(a1)
+        b1 = b1 - 1
+    }
+    println(a1)
+}
+
+fun main(): Unit {
+    add(145, 0)
+    add(40, 2)
+}

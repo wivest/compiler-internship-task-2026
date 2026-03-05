@@ -140,4 +140,28 @@ class MiniKotlinCompilerTest {
         val output = executionResult.stdout
         assertTrue(output.contains("10"), "Expected output to contain 10, but got: $output")
     }
+
+    @Test
+    fun `compile example_v5_mini outputs Zero 42`() {
+        val examplePath = Paths.get("samples/example.v5.mini")
+        val program = parseFile(examplePath)
+
+        val compiler = MiniKotlinCompiler()
+        val javaCode = compiler.compile(program)
+
+        val javaFile = tempDir.resolve("MiniProgram.java")
+        Files.writeString(javaFile, javaCode)
+
+        val javaCompiler = JavaRuntimeCompiler()
+        val stdlibPath = resolveStdlibPath()
+        val (compilationResult, executionResult) = javaCompiler.compileAndExecute(javaFile, stdlibPath)
+
+        assertIs<CompilationResult.Success>(compilationResult)
+        assertIs<ExecutionResult.Success>(executionResult)
+
+        val output = executionResult.stdout
+        val lines = output.lines()
+        assertTrue(lines[0].contains("Zero"), "Expected add(145, 0) to contain Zero, but got: ${lines[0]}")
+        assertTrue(lines[1].contains("42"), "Expected add(40, 2) to contain true, but got: ${lines[1]}")
+    }
 }

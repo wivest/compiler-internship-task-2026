@@ -2,8 +2,10 @@ package org.example.compiler
 
 import MiniKotlinBaseVisitor
 import MiniKotlinParser
+import org.antlr.v4.runtime.CommonToken
 import org.antlr.v4.runtime.tree.RuleNode
 import org.antlr.v4.runtime.tree.TerminalNode
+import org.antlr.v4.runtime.tree.TerminalNodeImpl
 
 class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
 
@@ -11,6 +13,8 @@ class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
     val contArgName = "arg"
     val currentExpressionFunCalls = mutableListOf<Pair<String, String>>()
     val blockFunCalls = mutableListOf<Int>()
+    val whileVarName = "while"
+    var whileLoops = 0
 
     val funParams = mutableListOf<String>() // not boxed types
 
@@ -66,9 +70,31 @@ ${visit(program)}
             ctx.BOOLEAN_TYPE() != null -> "Boolean"
             ctx.INT_TYPE() != null -> "Integer"
             ctx.STRING_TYPE() != null -> "String"
-            ctx.UNIT_TYPE() != null -> "void"
+            ctx.UNIT_TYPE() != null -> "Void"
             else -> null
         }
+    }
+
+    fun refactorIf(ctx: MiniKotlinParser.BlockContext, ifCtx: MiniKotlinParser.IfStatementContext, i: Int) {
+        // move statements and break
+        val block = ifCtx.block(0)
+        val elseBlock = ifCtx.block(1) ?: run {
+            ifCtx.addChild(TerminalNodeImpl(CommonToken(MiniKotlinLexer.ELSE, "else")))
+
+            val elseBlock = MiniKotlinParser.BlockContext(ifCtx, ifCtx.invokingState)
+            elseBlock.addChild(TerminalNodeImpl(CommonToken(MiniKotlinParser.LBRACE)))
+            elseBlock.addChild(TerminalNodeImpl(CommonToken(MiniKotlinParser.RBRACE)))
+            ifCtx.addChild(elseBlock)
+
+            elseBlock
+        }
+
+        val remaining = ctx.statement().subList(i + 1, ctx.statement().size)
+        if (block.statement().lastOrNull()?.returnStatement() == null)
+            block.children.addAll(block.children.size - 1, remaining)
+        if (elseBlock.statement().lastOrNull()?.returnStatement() == null)
+            elseBlock.children.addAll(elseBlock.children.size - 1, remaining)
+        remaining.clear()
     }
 
     override fun visitBlock(ctx: MiniKotlinParser.BlockContext): String {
@@ -79,15 +105,7 @@ ${visit(program)}
 
             val ifCtx = statement.ifStatement() // move rest of statements into if/else blocks
             if (ifCtx != null) {
-                // move statements and break
-                val block = ifCtx.block(0)
-                val elseBlock = ifCtx.block(1) // may be null
-
-                val remaining = ctx.statement().subList(i + 1, ctx.statement().size)
-                block.children.addAll(block.children.size - 1, remaining)
-                elseBlock?.children?.addAll(elseBlock.children.size - 1, remaining)
-                remaining.clear()
-
+                refactorIf(ctx, ifCtx, i)
                 result += "${visit(ifCtx)}\n"
                 break
             }
@@ -112,12 +130,9 @@ ${visit(program)}
     override fun visitStatement(ctx: MiniKotlinParser.StatementContext): String {
         return when {
             ctx.ifStatement() != null -> visit(ctx.ifStatement())
-            ctx.whileStatement() != null -> {
-                visitChildren(ctx) // TODO: while requires recursive function
-            }
+            ctx.whileStatement() != null -> visit(ctx.whileStatement())
 
             // FunctionCallExpr
-            // the only expression is function call
             ctx.expression() != null -> {
                 visitChildren(ctx)
                 wrapFunCalls()
@@ -152,10 +167,36 @@ ${visit(program)}
         return "${funCalls}if($expr)$block$elseBlock"
     }
 
+    override fun visitWhileStatement(ctx: MiniKotlinParser.WhileStatementContext): String {
+        blockFunCalls.add(0) // we are defining lambda which is a block
+
+        val condition = visit(ctx.expression())
+        val funCalls = wrapFunCalls()
+        val block = visit(ctx.block())
+        val funClose = "});".repeat(blockFunCalls.removeAt(blockFunCalls.lastIndex)) // close lambda block
+
+        val whileLoopNoThis = """
+Runnable $whileVarName$whileLoops = new Runnable() {
+@Override
+public void run() {
+${funCalls}if($condition)$block
+$funClose
+}
+};
+$whileVarName$whileLoops.run();
+        """.trimIndent()
+        val lines = whileLoopNoThis.lines().toMutableList() // use lines to insert this.run();
+        lines.add(lines.size - 5, "this.run();")
+        val whileLoop = lines.joinToString("\n")
+
+        whileLoops++
+        return whileLoop
+    }
+
     override fun visitReturnStatement(ctx: MiniKotlinParser.ReturnStatementContext): String {
-        val expression = when (val expressionContext = ctx.expression()) {
-            null -> ""
-            else -> visit(expressionContext)
+        val expression = when (val expressionCtx = ctx.expression()) {
+            null -> "null" // void return type
+            else -> visit(expressionCtx)
         }
         return "$contFunName.accept($expression);\nreturn"
     }
@@ -184,7 +225,7 @@ ${visit(program)}
 
     override fun visitIdentifierExpr(ctx: MiniKotlinParser.IdentifierExprContext): String {
         val id = visit(ctx.IDENTIFIER())
-        return if (funParams.contains(id)) id else "$id[0]"
+        return if (funParams.contains(id) || id == "this") id else "$id[0]"
     }
 
     override fun visitTerminal(node: TerminalNode): String = when (node.text) {
