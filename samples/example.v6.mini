@@ -1,0 +1,21 @@
+fun mul(num: Int): Int {
+    var n: Int = num
+    var i: Int = 0
+    while (i < 4) {
+        if (i == 3) {
+            return n
+        }
+        var j: Int = 0
+        while (j < 3) {
+            //println(i + j)
+            j = j + 1
+            n = n + 1
+        }
+        i = i + 1
+    }
+    return n
+}
+
+fun main(): Unit {
+    println(mul(0))
+}

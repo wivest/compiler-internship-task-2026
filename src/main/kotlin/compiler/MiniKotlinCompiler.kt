@@ -14,6 +14,7 @@ class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
     val currentExpressionFunCalls = mutableListOf<Pair<String, String>>()
     val blockFunCalls = mutableListOf<Int>()
     val whileVarName = "while"
+    val whileLoopElseBlocks = mutableListOf<MiniKotlinParser.BlockContext>()
     var whileLoops = 0
 
     val funParams = mutableListOf<String>() // not boxed types
@@ -36,6 +37,7 @@ ${visit(program)}
         return result
     }
 
+    // PROBLEM: declaration allows no parameters, but calling requires at least one argument
     override fun visitFunctionDeclaration(ctx: MiniKotlinParser.FunctionDeclarationContext): String {
         val modifiers = "public static void"
         val funName = visit(ctx.IDENTIFIER())
@@ -97,18 +99,39 @@ ${visit(program)}
         remaining.clear()
     }
 
+    fun addWhileElse(ctx: MiniKotlinParser.BlockContext, i: Int) {
+        val remaining = ctx.statement().subList(i + 1, ctx.statement().size)
+
+        val block = MiniKotlinParser.BlockContext(ctx, ctx.invokingState)
+        block.addChild(TerminalNodeImpl(CommonToken(MiniKotlinParser.LBRACE, "{")))
+        for (r in remaining) block.addChild(r)
+        block.addChild(TerminalNodeImpl(CommonToken(MiniKotlinParser.RBRACE, "}")))
+        whileLoopElseBlocks.add(block)
+        remaining.clear()
+    }
+
     override fun visitBlock(ctx: MiniKotlinParser.BlockContext): String {
         blockFunCalls.add(0) // new block, new function calls
         var result = ""
         for (i in 0..<ctx.statement().size) {
             val statement = ctx.statement(i)
 
-            val ifCtx = statement.ifStatement() // move rest of statements into if/else blocks
+            // move rest of statements into if/else blocks
+            val ifCtx = statement.ifStatement()
             if (ifCtx != null) {
                 refactorIf(ctx, ifCtx, i)
                 result += "${visit(ifCtx)}\n"
                 break
             }
+
+            // remove rest of statements to create modified while-else block
+            val whileCtx = statement.whileStatement()
+            if (whileCtx != null) {
+                addWhileElse(ctx, i)
+                result += "${visit(whileCtx)}\n"
+                break
+            }
+
             result += "${visit(statement)}\n"
         }
 
@@ -173,21 +196,23 @@ ${visit(program)}
         val condition = visit(ctx.expression())
         val funCalls = wrapFunCalls()
         val block = visit(ctx.block())
+        val elseBlock = visit(whileLoopElseBlocks.removeAt(whileLoopElseBlocks.lastIndex))
         val funClose = "});".repeat(blockFunCalls.removeAt(blockFunCalls.lastIndex)) // close lambda block
 
-        val whileLoopNoThis = """
+        val whileLoopNoElse = """
 Runnable $whileVarName$whileLoops = new Runnable() {
 @Override
 public void run() {
-${funCalls}if($condition)$block
+${funCalls}if($condition)${block}
+        """.trimIndent()
+        val lines = whileLoopNoElse.lines().toMutableList() // use lines to insert this.run();
+        lines.add(lines.size - 1, "this.run();")
+        val whileLoop = lines.joinToString("\n") + """else$elseBlock
 $funClose
 }
 };
 $whileVarName$whileLoops.run();
         """.trimIndent()
-        val lines = whileLoopNoThis.lines().toMutableList() // use lines to insert this.run();
-        lines.add(lines.size - 5, "this.run();")
-        val whileLoop = lines.joinToString("\n")
 
         whileLoops++
         return whileLoop

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -163,5 +164,28 @@ class MiniKotlinCompilerTest {
         val lines = output.lines()
         assertTrue(lines[0].contains("Zero"), "Expected add(145, 0) to contain Zero, but got: ${lines[0]}")
         assertTrue(lines[1].contains("42"), "Expected add(40, 2) to contain true, but got: ${lines[1]}")
+    }
+
+    @Test
+    fun `compile example_v6_mini outputs 9`() {
+        val examplePath = Paths.get("samples/example.v6.mini")
+        val program = parseFile(examplePath)
+
+        val compiler = MiniKotlinCompiler()
+        val javaCode = compiler.compile(program)
+
+        val javaFile = tempDir.resolve("MiniProgram.java")
+        Files.writeString(javaFile, javaCode)
+
+        val javaCompiler = JavaRuntimeCompiler()
+        val stdlibPath = resolveStdlibPath()
+        val (compilationResult, executionResult) = javaCompiler.compileAndExecute(javaFile, stdlibPath)
+
+        assertIs<CompilationResult.Success>(compilationResult)
+        assertIs<ExecutionResult.Success>(executionResult)
+
+        val output = executionResult.stdout
+        assertEquals(2, output.lines().size, "Expected to contain 2 lines, but got: ${output.lines().size}")
+        assertTrue(output.contains("9"), "Expected to contain 9, but got: $output")
     }
 }
