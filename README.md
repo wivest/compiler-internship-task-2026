@@ -129,3 +129,8 @@ public class MiniProgram {
 ## Evaluation
 
 The task will be tested on a hidden set of tests.
+
+## Found inconsistencies
+
+The MiniKotlin grammar allows function declarations with no parameters, but calling a function requires at least one
+argument. The issue could be resolved by adding `?` to `argumentList?` in `# FunctionCallExpr`
