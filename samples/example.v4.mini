@@ -1,0 +1,17 @@
+fun add(a: Int, b: Int): Int {
+    return a + b
+}
+
+fun main(): Unit {
+    var a: Int = add(1, 1) // 2
+    var b: Int = add(add(1, 1), 2) // 4
+    if (add(add(a, 0), 1) < b) {
+        a = 8
+        a = add(a-b, 2) // 6
+    } else {
+        b = 2
+        a = 0
+        a = add(b, 2)
+    }
+    println(a + b) // 10
+}

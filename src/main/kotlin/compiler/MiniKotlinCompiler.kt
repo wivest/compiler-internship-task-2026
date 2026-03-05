@@ -9,10 +9,10 @@ class MiniKotlinCompiler : MiniKotlinBaseVisitor<String>() {
 
     val contFunName = "__continuation"
     val contArgName = "arg"
-    val expressionFunCalls = mutableListOf<Pair<String, String>>()
-    var blockFunCalls = 0
+    val currentExpressionFunCalls = mutableListOf<Pair<String, String>>()
+    val blockFunCalls = mutableListOf<Int>()
 
-    val funParams = mutableListOf<String>()
+    val funParams = mutableListOf<String>() // not boxed types
 
     fun compile(program: MiniKotlinParser.ProgramContext, className: String = "MiniProgram"): String {
         return """
@@ -72,34 +72,62 @@ ${visit(program)}
     }
 
     override fun visitBlock(ctx: MiniKotlinParser.BlockContext): String {
+        blockFunCalls.add(0) // new block, new function calls
         var result = ""
-        for (statement in ctx.statement()) {
+        for (i in 0..<ctx.statement().size) {
+            val statement = ctx.statement(i)
+
+            val ifCtx = statement.ifStatement() // move rest of statements into if/else blocks
+            if (ifCtx != null) {
+                // move statements and break
+                val block = ifCtx.block(0)
+                val elseBlock = ifCtx.block(1) // may be null
+
+                val remaining = ctx.statement().subList(i + 1, ctx.statement().size)
+                block.children.addAll(block.children.size - 1, remaining)
+                elseBlock?.children?.addAll(elseBlock.children.size - 1, remaining)
+                remaining.clear()
+
+                result += "${visit(ifCtx)}\n"
+                break
+            }
             result += "${visit(statement)}\n"
         }
 
-        for (i in 0..<blockFunCalls) result += "});"
-        blockFunCalls = 0
+        result += "});".repeat(blockFunCalls.removeAt(blockFunCalls.lastIndex))
         return "{\n$result}"
     }
 
+    fun wrapFunCalls(): String {
+        var funCalls = ""
+        for (i in 0..<currentExpressionFunCalls.size) {
+            val funCall = currentExpressionFunCalls[i]
+            val argI = blockFunCalls.sum() - currentExpressionFunCalls.size + i
+            funCalls += "${funCall.first}(${funCall.second}, ($contArgName${argI}) -> {\n"
+        }
+        currentExpressionFunCalls.clear()
+        return funCalls
+    }
+
     override fun visitStatement(ctx: MiniKotlinParser.StatementContext): String {
-        val statement = when {
-            ctx.ifStatement() != null || ctx.whileStatement() != null -> visitChildren(ctx)
-            ctx.expression() != null -> {
-                visitChildren(ctx); "" // the only expression is function call
+        return when {
+            ctx.ifStatement() != null -> visit(ctx.ifStatement())
+            ctx.whileStatement() != null -> {
+                visitChildren(ctx) // TODO: while requires recursive function
             }
 
-            else -> "${visitChildren(ctx)};"
-        }
+            // FunctionCallExpr
+            // the only expression is function call
+            ctx.expression() != null -> {
+                visitChildren(ctx)
+                wrapFunCalls()
+            }
 
-        var funCalls = ""
-        for (funCall in expressionFunCalls) {
-            funCalls += "${funCall.first}(${funCall.second}, ($contArgName$blockFunCalls) -> {\n"
-            blockFunCalls++
+            else -> {
+                val children = visitChildren(ctx)
+                "${wrapFunCalls()}$children;"
+            }
         }
-        expressionFunCalls.clear()
-
-        return "$funCalls$statement"
     }
 
     override fun visitVariableDeclaration(ctx: MiniKotlinParser.VariableDeclarationContext): String {
@@ -115,6 +143,15 @@ ${visit(program)}
         return "$varName[0] = $expression"
     }
 
+    override fun visitIfStatement(ctx: MiniKotlinParser.IfStatementContext): String {
+        val expr = visit(ctx.expression())
+        val funCalls = wrapFunCalls()
+        val block = visit(ctx.block(0))
+        val elseBlockCtx = ctx.block(1)
+        val elseBlock = if (elseBlockCtx != null) "else${visit(elseBlockCtx)}" else ""
+        return "${funCalls}if($expr)$block$elseBlock"
+    }
+
     override fun visitReturnStatement(ctx: MiniKotlinParser.ReturnStatementContext): String {
         val expression = when (val expressionContext = ctx.expression()) {
             null -> ""
@@ -126,9 +163,9 @@ ${visit(program)}
     override fun visitFunctionCallExpr(ctx: MiniKotlinParser.FunctionCallExprContext): String {
         val funName = visit(ctx.IDENTIFIER())
         val argList = visit(ctx.argumentList())
-        val i = expressionFunCalls.size
-        expressionFunCalls.add(Pair(funName, argList))
-        return "$contArgName$i"
+        currentExpressionFunCalls.add(Pair(funName, argList))
+        blockFunCalls[blockFunCalls.lastIndex]++
+        return "$contArgName${blockFunCalls.sum() - 1}"
     }
 
     override fun visitComparisonExpr(ctx: MiniKotlinParser.ComparisonExprContext): String {
